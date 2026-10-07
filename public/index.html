@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Shortener Lab — mint short codes with a counter vs random draws, trace the write and read paths, move analytics off the redirect, and watch a cached 301 silently zero your click counts.">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf6ef">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161009">
+  <title>Shortener Lab — URL shortener internals</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+  <link rel="stylesheet" href="/tokens.css">
+  <link rel="stylesheet" href="/styles.css">
+<!-- pb-shell --><link rel="stylesheet" href="./pb-shell.css"><!-- pb-shell --><!-- pb-back --><link rel="stylesheet" href="./pb-back.css"><!-- pb-back --></head>
+<body>
+<a class="skip-link" href="#mint">Skip to the lab</a>
+<main>
+  <nav aria-label="Primary"><a aria-current="page" href="/">Lab</a><a href="/guide.html">Guide</a><a href="https://github.com/anhquanbd2021/url-shortener-design">Source</a></nav>
+  <header class="hero">
+    <div><p class="eyebrow">Shortener Lab · a failure-modes lab</p><h1>Four decisions sink a URL shortener. Break each one here.</h1><p class="lede">Mint a short code, store one row, redirect — it looks easy until the failure modes show up in production. Replay all four: how the code is minted, what the write and read paths touch, where analytics sits, and which redirect status you return.</p></div>
+    <p class="warning"><strong>Educational model.</strong> The lab is an in-memory replay of the article's argument — real HTTP on the live endpoint, representative latencies elsewhere. Nothing leaves your browser except the calls you make to this server.</p>
+  </header>
+
+  <p class="claim">Redirect first, count afterwards — and mint codes you never have to check.</p>
+
+  <section id="mint" aria-labelledby="h-codes">
+    <div class="section-heading"><div><p class="eyebrow">Decision one</p><h2 id="h-codes">Mint the code — counter vs dice</h2></div></div>
+    <p>A <strong>counter encoded in base62</strong> is unique by construction: zero lookups on the write path. A <strong>random draw</strong> must be checked against the database on every insert — and retried on collision. Enable <em>rig collisions</em> to force the random generator to re-draw issued codes, so the failure is visible instead of lucky.</p>
+    <div class="modebar" role="group" aria-label="Code generation strategy">
+      <button id="btnCounter" type="button" class="toggle on" aria-pressed="true">Counter → base62</button>
+      <button id="btnRandom" type="button" class="toggle" aria-pressed="false">Random draw + check</button>
+      <label class="rig"><input type="checkbox" id="rigChk"> rig collisions</label>
+      <button id="btnShorten" type="button">Shorten 200 links</button>
+    </div>
+    <div class="stats" aria-live="polite">
+      <div class="stat"><div class="n" id="stCodes">0</div><div class="l">codes issued</div></div>
+      <div class="stat"><div class="n" id="stLookups">0</div><div class="l">collision lookups (DB reads)</div></div>
+      <div class="stat"><div class="n" id="stSpace">3.5T</div><div class="l">7-char base62 space (62⁷)</div></div>
+    </div>
+    <div class="card" id="codeTrace" aria-live="polite"></div>
+    <div class="codes" id="codeList" aria-label="Recently issued codes"></div>
+  </section>
+
+  <section aria-labelledby="h-read">
+    <div class="section-heading"><div><p class="eyebrow">Decision two</p><h2 id="h-read">The read path — one cache read</h2></div></div>
+    <p>Redirect traffic is skewed: a handful of viral links carry almost all clicks. Fire 100 clicks with 90% aimed at one hot link and watch the cache absorb them. A miss costs a DB read; a hit costs ~1 ms.</p>
+    <div class="modebar">
+      <button id="btnReads" type="button">Send 100 clicks (90% hot)</button>
+    </div>
+    <div class="stats" aria-live="polite">
+      <div class="stat"><div class="n" id="stHitRate">—</div><div class="l">cache hit rate</div></div>
+      <div class="stat"><div class="n" id="stCacheHits">0</div><div class="l">cache hits</div></div>
+      <div class="stat"><div class="n" id="stCacheMiss">0</div><div class="l">cache misses → DB reads</div></div>
+    </div>
+    <div class="card" id="readTrace" aria-live="polite"></div>
+  </section>
+
+  <section aria-labelledby="h-analytics">
+    <div class="section-heading"><div><p class="eyebrow">Decision three</p><h2 id="h-analytics">Analytics — after the redirect, never inside it</h2></div></div>
+    <p>The popular diagram puts a click-row <code>INSERT</code> between the cache read and the <code>302</code>. Then redirect latency is a database write. Queue the event instead: the user is already gone when it gets counted.</p>
+    <div class="modebar">
+      <button id="btnAnalytics" type="button">Compare: 100 clicks each way</button>
+    </div>
+    <div class="vs" aria-live="polite">
+      <div class="card fail">
+        <h3>Inline <code>INSERT INTO clicks</code></h3>
+        <div class="stat"><div class="n bad" id="latInline">—</div><div class="l">avg redirect latency</div></div>
+        <div class="bar"><div class="bar fill bad" id="barInline" style="width:0%"></div></div>
+        <p class="note" id="noteInline">The redirect waits on a DB write.</p>
+      </div>
+      <div class="card">
+        <h3>Queued event → consumer counts</h3>
+        <div class="stat"><div class="n" id="latQueued">—</div><div class="l">avg redirect latency</div></div>
+        <div class="bar"><div class="bar fill" id="barQueued" style="width:0%"></div></div>
+        <p class="note" id="noteQueued">Publish and forget — off the read path.</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-status">
+    <div class="section-heading"><div><p class="eyebrow">Decision four</p><h2 id="h-status"><code>301</code> vs <code>302</code> — the silent zero</h2></div></div>
+    <p><code>301 Moved Permanently</code> tells the browser to cache the redirect — possibly forever. The first click reaches your server; every later click resolves inside the browser. <code>302</code> must re-ask every time, so every click is counted. Send 10 repeat clicks each way and compare.</p>
+    <div class="modebar">
+      <button id="btnStatusRun" type="button">Send 10 repeat clicks, both statuses</button>
+    </div>
+    <div class="vs" aria-live="polite">
+      <div class="card" id="card301">
+        <h3><code>301</code> — permanent</h3>
+        <div class="stats">
+          <div class="stat"><div class="n" id="sent301">0</div><div class="l">clicks sent</div></div>
+          <div class="stat"><div class="n bad" id="counted301">0</div><div class="l">clicks counted</div></div>
+          <div class="stat"><div class="n bad" id="lost301">0</div><div class="l">absorbed by browser cache</div></div>
+        </div>
+        <div class="steps" id="steps301"></div>
+      </div>
+      <div class="card" id="card302">
+        <h3><code>302</code> — temporary</h3>
+        <div class="stats">
+          <div class="stat"><div class="n" id="sent302">0</div><div class="l">clicks sent</div></div>
+          <div class="stat"><div class="n" id="counted302">0</div><div class="l">clicks counted</div></div>
+          <div class="stat"><div class="n" id="lost302">0</div><div class="l">absorbed by browser cache</div></div>
+        </div>
+        <div class="steps" id="steps302"></div>
+      </div>
+    </div>
+    <p class="note bad" id="statusNote" role="status"></p>
+  </section>
+
+  <section aria-labelledby="h-live">
+    <div class="section-heading"><div><p class="eyebrow">Over the wire</p><h2 id="h-live">Over real HTTP — <code>GET /r/:code</code></h2></div></div>
+    <p>Everything above ran the shared model in this page. The server runs the same model over actual HTTP: shorten a URL, then open the generated <code>/r/</code> link — it returns a real <code>302</code> (or <code>301</code>) redirect and queues a click event. Open a <code>?status=301</code> link twice in the same browser and the second click may never reach the server.</p>
+    <div class="modebar">
+      <input type="url" id="urlInput" placeholder="https://example.com/landing" value="https://example.com/landing" aria-label="Long URL to shorten">
+      <select id="liveStrategy" aria-label="Generation strategy">
+        <option value="counter">counter</option>
+        <option value="random">random</option>
+      </select>
+      <select id="liveStatus" aria-label="Redirect status">
+        <option value="302">302</option>
+        <option value="301">301</option>
+      </select>
+      <button id="btnLiveShorten" type="button">Shorten via API</button>
+      <button id="btnLiveReset" type="button" class="secondary">Reset server lab</button>
+    </div>
+    <div class="card" id="liveOut" aria-live="polite">
+      <p class="note">No link yet — shorten one above.</p>
+    </div>
+    <div class="stats" aria-live="polite">
+      <div class="stat"><div class="n" id="liveCodes">0</div><div class="l">server codes issued</div></div>
+      <div class="stat"><div class="n" id="liveClicks">0</div><div class="l">server clicks counted</div></div>
+      <div class="stat"><div class="n" id="liveRedirects">0</div><div class="l">redirects served</div></div>
+    </div>
+  </section>
+
+  <p><a href="/guide.html">Read what each decision proves — and where the model stops</a> · <a href="https://github.com/anhquanbd2021/url-shortener-design">Inspect source and tests</a></p>
+</main>
+<script type="module" src="/app/app.js"></script>
+<!-- pb-shell --><a class="pb-shell" href="https://github.com/anhquanbd2021/url-shortener-design" title="url-shortener-design — an Article Playbook demo (view source)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="2" width="9" height="9" rx="2" fill="rgb(45,212,191)"/><rect x="13" y="2" width="9" height="9" rx="2" fill="rgb(45,212,191)" opacity=".45"/><rect x="2" y="13" width="9" height="9" rx="2" fill="rgb(45,212,191)" opacity=".45"/><rect x="13" y="13" width="9" height="9" rx="4.5" fill="rgb(45,212,191)"/></svg><b>url-shortener-design</b><i>DEMO</i></a><!-- pb-shell --><!-- pb-back --><a class="pb-back" id="pb-back" href="https://github.com/anhquanbd2021/url-shortener-design" title="Back to the article — url-shortener-design">← Article <i>PLAYBOOK</i></a><script>(function(){var a=document.getElementById('pb-back');if(!a)return;var h=location.hostname;if(/^(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(h)){a.href='//'+h+':'+(/^(localhost|127\.0\.0\.1)$/.test(h)?'1234':'30082')+'/microsites/article.html?slug=url-shortener-design';}})();</script><!-- pb-back --></body>
+</html>

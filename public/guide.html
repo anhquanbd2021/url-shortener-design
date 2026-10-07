@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Guide to Shortener Lab — what each of the four decisions proves, how the in-page model and the real /r/:code endpoint work, and where the demo's limits are.">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf6ef">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161009">
+  <title>Shortener Lab Guide</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+  <link rel="stylesheet" href="/tokens.css">
+  <link rel="stylesheet" href="/styles.css">
+<!-- pb-shell --><link rel="stylesheet" href="./pb-shell.css"><!-- pb-shell --><!-- pb-back --><link rel="stylesheet" href="./pb-back.css"><!-- pb-back --></head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<main id="main">
+  <nav aria-label="Primary"><a href="/">Lab</a><a aria-current="page" href="/guide.html">Guide</a><a href="https://github.com/anhquanbd2021/url-shortener-design">Source</a></nav>
+  <header class="hero">
+    <div><p class="eyebrow">Lab guide</p><h1>Redirect first, count afterwards — and mint codes you never have to check</h1><p class="lede">The whole service compresses to one sentence. Each panel below maps a lab feature to the claim it proves — and the production failure mode it makes visible before production does.</p></div>
+    <p class="warning"><strong>A model, not a deployment.</strong> The store, cache, browser cache, and queue are in-memory stand-ins; latencies are representative constants. The lab makes the article's claims legible — it does not serve real traffic.</p>
+  </header>
+
+  <section class="guide-section"><p class="eyebrow">The lab features</p><h2>What each decision proves</h2><div class="control-grid">
+    <article class="panel control"><span class="control-number">Minting</span><h3>A counter beats dice</h3><p>Shorten 200 links with the counter strategy — zero collision lookups, because a monotonic counter encoded in base62 is unique by construction. Switch to random draw, enable <em>rig collisions</em>, and watch extra <code>SELECT</code> round trips pile up before every insert.</p><dl><dt>Proves</dt><dd>Code generation is the real design question: counter + base62 gives uniqueness for free; random draws buy a mandatory collision check on every write, forever.</dd><dt>Key detail</dt><dd>7 base62 chars span 62⁷ ≈ 3.5 trillion codes — ~17× what a busy service mints in a decade. Hashing the URL itself is the interview anti-pattern: two users, same URL, same code.</dd></dl></article>
+    <article class="panel control"><span class="control-number">Read path</span><h3>A redirect is one cache read</h3><p>Fire 100 clicks with 90% aimed at one hot link. The cache absorbs the skew and the database only serves cold misses — the trace shows hit vs miss hop by hop.</p><dl><dt>Proves</dt><dd>Click traffic is power-law skewed — roughly 1% of links carry over 90% of clicks — so a tiny hot set in RAM sees &gt;99% hit rates.</dd><dt>Key detail</dt><dd>Cache-aside done right: miss → <code>SELECT</code> → populate → redirect. Every miss makes the next hit free; skipping the layer "because Postgres is fast" turns the first viral moment into pool exhaustion.</dd></dl></article>
+    <article class="panel control"><span class="control-number">Analytics</span><h3>After the redirect, never inside it</h3><p>Compare 100 clicks each way. An inline <code>INSERT INTO clicks</code> adds a full DB write to every redirect; a queued event adds ~0 ms and still counts every click.</p><dl><dt>Proves</dt><dd>The most-copied shortener diagram is wrong: analytics inside the read path makes redirect latency a database write — hundreds of ms at p99 under contention.</dd><dt>Key detail</dt><dd>The fix is ordering, not omission: publish <code>{code, ts, referrer, ua, ip}</code> to a queue, return the <code>302</code> immediately, let a consumer count asynchronously. The user is already gone.</dd></dl></article>
+    <article class="panel control"><span class="control-number">Status code</span><h3><code>301</code> is a one-way door</h3><p>Send 10 repeat clicks per status. With <code>301</code>, one click is counted and nine resolve inside the browser cache — the server never sees them. With <code>302</code>, all ten arrive.</p><dl><dt>Proves</dt><dd><code>301 Moved Permanently</code> tells the browser to cache the redirect — possibly forever. The dashboard reads zero while the links work fine: the article's 9:15 incident.</dd><dt>Key detail</dt><dd>With 301 you also lose the ability to edit the destination or kill the link — the browser won't ask. Default to <code>302</code>/<code>307</code>; choose 301 only when losing the traffic is the goal.</dd></dl></article>
+    <article class="panel control"><span class="control-number">Real HTTP</span><h3>The same model over the wire</h3><p>Section five drives the server, not the page: <code>POST /api/shorten</code> mints a code, and the generated <code>/r/:code</code> link returns a real <code>301</code>/<code>302</code> redirect with a queued click event.</p><dl><dt>Proves</dt><dd>The mechanisms are not just a simulation — the browser and the test suite exercise the same domain model the server runs.</dd><dt>Key detail</dt><dd>Open a <code>?status=301</code> link twice in the same browser: the second request may never leave it. No cookie, no request log — the click simply never exists.</dd></dl></article>
+  </div></section>
+
+  <p><a class="try" href="/">Return to Lab</a> · <a href="https://github.com/anhquanbd2021/url-shortener-design">Inspect source and tests</a></p>
+</main>
+<!-- pb-shell --><a class="pb-shell" href="https://github.com/anhquanbd2021/url-shortener-design" title="url-shortener-design — an Article Playbook demo (view source)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="2" width="9" height="9" rx="2" fill="rgb(45,212,191)"/><rect x="13" y="2" width="9" height="9" rx="2" fill="rgb(45,212,191)" opacity=".45"/><rect x="2" y="13" width="9" height="9" rx="2" fill="rgb(45,212,191)" opacity=".45"/><rect x="13" y="13" width="9" height="9" rx="4.5" fill="rgb(45,212,191)"/></svg><b>url-shortener-design</b><i>DEMO</i></a><!-- pb-shell --><!-- pb-back --><a class="pb-back" id="pb-back" href="https://github.com/anhquanbd2021/url-shortener-design" title="Back to the article — url-shortener-design">← Article <i>PLAYBOOK</i></a><script>(function(){var a=document.getElementById('pb-back');if(!a)return;var h=location.hostname;if(/^(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(h)){a.href='//'+h+':'+(/^(localhost|127\.0\.0\.1)$/.test(h)?'1234':'30082')+'/microsites/article.html?slug=url-shortener-design';}})();</script><!-- pb-back --></body>
+</html>

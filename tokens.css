@@ -1,0 +1,73 @@
+/* tokens.css — direction "switchboard" (generated; do not hand-edit) */
+:root {
+  color-scheme: light;
+  --color-bg: #faf6ef;
+  --color-text: #26190a;
+  --color-surface: #ffffff;
+  --color-accent-fill: #92400e;
+  --color-accent-text: #ffffff;
+  --color-on-accent: #ffffff;
+  --accent-50: #fffbeb;
+  --accent-100: #fef3c7;
+  --accent-200: #fde68a;
+  --accent-300: #fcd34d;
+  --accent-400: #fbbf24;
+  --accent-500: #f59e0b;
+  --accent-600: #d97706;
+  --accent-700: #b45309;
+  --accent-800: #92400e;
+  --accent-900: #78350f;
+  --accent-950: #451a03;
+  --danger-300: #b91c1c;
+  --danger-500: #dc2626;
+  --danger-fill: #dc2626;
+  --danger-text: #ffffff;
+  --step-xs: 12px;
+  --step-sm: 14px;
+  --step-base: 16px;
+  --step-lg: 20px;
+  --step-xl: 28px;
+  --step-2xl: 40px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --font-heading: "Space Grotesk", sans-serif;
+  --font-body: Inter, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --color-bg: #161009;
+    --color-text: #f0e7d6;
+    --color-surface: #241b0e;
+    --color-accent-fill: #fbbf24;
+    --color-accent-text: #241703;
+    --color-on-accent: #241703;
+    --accent-50: #2a1d08;
+    --accent-100: #3a2809;
+    --accent-200: #57390c;
+    --accent-300: #7a5210;
+    --accent-400: #9a6a13;
+    --accent-500: #b45309;
+    --accent-600: #d97706;
+    --accent-700: #f59e0b;
+    --accent-800: #fbbf24;
+    --accent-900: #fde68a;
+    --accent-950: #fef3c7;
+    --danger-300: #fca5a5;
+    --danger-500: #f87171;
+    --danger-fill: #f87171;
+    --danger-text: #450a0a;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
